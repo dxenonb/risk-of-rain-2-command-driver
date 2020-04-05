@@ -1,8 +1,17 @@
 pub mod robot;
 
+#[cfg(feature="image-impl")]
+use image::{
+    Pixel,
+    RgbImage,
+    Rgb,
+};
+
 use std::collections::HashMap;
 use std::cmp;
 use std::ptr;
+#[cfg(feature="image-impl")]
+use std::ops::Deref;
 
 pub struct ItemPos(pub u32, pub u32);
 
@@ -32,6 +41,9 @@ pub enum ItemClass {
     UseItem,
     BossItem,
 }
+
+pub struct Win32Color(pub winapi::shared::windef::COLORREF);
+pub struct Win32Bitmap(pub winapi::shared::windef::HBITMAP);
 
 /// Describes the ROR2 command chest UI and user's screen
 ///
@@ -66,25 +78,25 @@ pub fn item_to_screen_pos(
     robot::MousePos(x as _, y as _)
 }
 
-trait ColorSrc {
+pub trait ColorSrc {
     type C: Color;
 
     fn get_pixel(&self, x: i32, y: i32) -> Self::C;
 }
 
-trait Color {
+pub trait Color {
     fn get_red(&self) -> u8;
     fn get_blue(&self) -> u8;
     fn get_green(&self) -> u8;
 }
 
-impl ColorSrc for winapi::shared::windef::HBITMAP {
-    type C = winapi::shared::windef::COLORREF;
+impl ColorSrc for Win32Bitmap {
+    type C = Win32Color;
 
     fn get_pixel(&self, x: i32, y: i32) -> Self::C {
         use winapi::um::wingdi::{GetPixel, CLR_INVALID};
 
-        let pixel = unsafe { GetPixel(*self as *mut _, x, y) };
+        let pixel = unsafe { GetPixel(self.0 as *mut _, x, y) };
         if pixel == CLR_INVALID {
             panic!(
                 "Got invalid color for ({}, {}) - position must be out of bounds!",
@@ -92,24 +104,47 @@ impl ColorSrc for winapi::shared::windef::HBITMAP {
                 y
             );
         }
-        pixel
+        Win32Color(pixel)
     }
 }
 
-impl Color for winapi::shared::windef::COLORREF {
-
+impl Color for Win32Color {
     fn get_red(&self) -> u8 {
-        winapi::um::wingdi::GetRValue(*self)
+        winapi::um::wingdi::GetRValue(self.0)
     }
 
     fn get_green(&self) -> u8 {
-        winapi::um::wingdi::GetBValue(*self)
+        winapi::um::wingdi::GetBValue(self.0)
     }
 
     fn get_blue(&self) -> u8 {
-        winapi::um::wingdi::GetGValue(*self)
+        winapi::um::wingdi::GetGValue(self.0)
+    }
+}
+
+#[cfg(feature="image-impl")]
+impl ColorSrc for &RgbImage
+{
+    type C = Rgb<u8>;
+
+    fn get_pixel(&self, x: i32, y: i32) -> Self::C {
+        *RgbImage::get_pixel(self, x as _, y as _)
+    }
+}
+
+#[cfg(feature="image-impl")]
+impl<P: Pixel<Subpixel=u8>> Color for P {
+    fn get_red(&self) -> u8 {
+        self.to_rgb().0[0]
     }
 
+    fn get_green(&self) -> u8 {
+        self.to_rgb().0[1]
+    }
+
+    fn get_blue(&self) -> u8 {
+        self.to_rgb().0[2]
+    }
 }
 
 pub fn screen_cap() {
@@ -156,6 +191,7 @@ pub fn screen_cap() {
 
         // process the bitmap ////
         {
+            let bmp_target = Win32Bitmap(bmp_target);
             // get avg distance from target color across left side
             let green = (118, 237, 34);
             let avg = average_distance2(bmp_target, &green, 671, cy/2, 10);
@@ -174,7 +210,7 @@ pub fn screen_cap() {
     }
 }
 
-unsafe fn average_distance2<C: ColorSrc>(
+pub fn average_distance2<C: ColorSrc>(
     bitmap: C,
     target_color: &(i32, i32, i32),
     mut x: i32,
@@ -182,7 +218,7 @@ unsafe fn average_distance2<C: ColorSrc>(
     span: i32,
 ) -> i32 {
     let mut sum = 0;
-    for i in 0..span {
+    for _ in 0..span {
         let color = bitmap.get_pixel(x, y);
         sum += color_distance2(color, target_color);
         x += 1;
@@ -191,7 +227,7 @@ unsafe fn average_distance2<C: ColorSrc>(
     sum / span
 }
 
-fn color_distance2<C: Color>(c: C, (r, g, b): &(i32, i32, i32)) -> i32 {
+pub fn color_distance2<C: Color>(c: C, (r, g, b): &(i32, i32, i32)) -> i32 {
     let src_red = c.get_red() as i32;
     let src_green = c.get_green() as i32;
     let src_blue = c.get_blue() as i32;
