@@ -5,6 +5,7 @@ use ror2_command::{
     ItemClass,
     ScreenInfo,
     item_to_screen_pos,
+    screen_cap,
 };
 
 use std::collections::HashMap;
@@ -25,7 +26,8 @@ fn main() -> Result<(), ()> {
         grid_size,
     };
 
-    debug_mouse(&mut robot, &ItemClass::White, &screen);
+    // debug_mouse(&mut robot, &ItemClass::White, &screen);
+    screen_cap();
 
     Ok(())
 }

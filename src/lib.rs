@@ -10,6 +10,8 @@ use image::{
 use std::collections::HashMap;
 use std::cmp;
 use std::ptr;
+use std::mem;
+use std::mem::MaybeUninit;
 #[cfg(feature="image-impl")]
 use std::ops::Deref;
 
@@ -148,6 +150,7 @@ impl<P: Pixel<Subpixel=u8>> Color for P {
 }
 
 pub fn screen_cap() {
+    use winapi::shared::minwindef::WORD;
     use winapi::um::winuser::{
         GetDC,
         GetSystemMetrics,
@@ -160,12 +163,21 @@ pub fn screen_cap() {
     use winapi::um::wingdi::{
         CreateCompatibleDC,
         CreateCompatibleBitmap,
+        GetObjectA,
         SelectObject,
+        DeleteObject,
         BitBlt,
         DeleteDC,
-        DeleteObject,
+        GetDIBits,
         SRCCOPY,
         CAPTUREBLT,
+        BITMAP,
+        BI_RGB,
+        BITMAPINFO,
+        BITMAPINFOHEADER,
+        BITMAPFILEHEADER,
+        RGBQUAD,
+        DIB_RGB_COLORS,
     };
     // Adapted from:
     // https://stackoverflow.com/questions/3291167/how-can-i-take-a-screenshot-in-a-windows-application
@@ -190,16 +202,66 @@ pub fn screen_cap() {
         }
 
         // process the bitmap ////
-        {
-            let bmp_target = Win32Bitmap(bmp_target);
-            // get avg distance from target color across left side
-            let green = (118, 237, 34);
-            let avg = average_distance2(bmp_target, &green, 671, cy/2, 10);
-            println!("average: {:?}", avg);
-            // across the right side
-            // find the minimum
-            // verify they are similar
+        // {
+        //     let bmp_target = Win32Bitmap(bmp_target);
+        //     // get avg distance from target color across left side
+        //     let green = (118, 237, 34);
+        //     let avg = average_distance2(bmp_target, &green, 671, cy/2, 10);
+        //     println!("Got avg: {}", avg);
+        //     // across the right side
+        //     // find the minimum
+        //     // verify they are similar
+        // }
+
+        // save bitmap to a file
+        let mut buffer: MaybeUninit<BITMAP> = MaybeUninit::uninit();
+        let bitmap_size = mem::size_of::<BITMAP>() as _;
+        let result = GetObjectA(bmp_target as *mut _, bitmap_size, buffer.as_mut_ptr() as *mut _);
+        if result == 0 || result != bitmap_size {
+            panic!("Failed to get object");
         }
+        let bmp = buffer.assume_init();
+        let clr_bits: WORD = (bmp.bmPlanes * bmp.bmBitsPixel) as _;
+        if clr_bits != 32 {
+            panic!("expected 32 bit image, got {}", clr_bits);
+        }
+        let mut bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: mem::size_of::<BITMAPINFOHEADER>() as _,
+                biWidth: bmp.bmWidth,
+                biHeight: bmp.bmHeight,
+                biPlanes: bmp.bmPlanes,
+                biBitCount: bmp.bmBitsPixel,
+                biCompression: BI_RGB,
+                ..Default::default()
+            },
+            bmiColors: Default::default(),
+        };
+        let size_image = (((bmp.bmWidth * (clr_bits as i32) + 31) & !31) / 8 * bmp.bmHeight) as usize;
+        bmi.bmiHeader.biSizeImage = (((bmi.bmiHeader.biWidth * (clr_bits as i32) + 31) & !31) / 8
+            * bmi.bmiHeader.biHeight) as _;
+        bmi.bmiHeader.biClrImportant = 0;
+
+        use std::fs::File;
+
+        let mut bits: Vec<u8> = vec![0; size_image];
+        let r = GetDIBits(
+            dc_screen,
+            bmp_target,
+            0,
+            cy as _,
+            bits.as_mut_ptr() as *mut _,
+            &mut bmi as *mut _,
+            DIB_RGB_COLORS,
+        );
+        if r != cy {
+            println!("Result of getting bits is: {}, expected no. of scanlines {}", r, cy);
+        }
+
+        let mut f = File::create("bitmap.png").unwrap();
+        let encoder = image::png::PNGEncoder::new(&mut f);
+        encoder.encode(&bits, cx as _, cy as _, image::ColorType::Bgra8)
+            .unwrap();
 
         SelectObject(dc_target, old_bmp);
         DeleteDC(dc_target);

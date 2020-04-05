@@ -4,12 +4,6 @@ version = "0.1.0"
 authors = ["dxb"]
 edition = "2018"
 
-[features]
-image-impl = [ "image" ]
-
 [dependencies]
-winapi = { version = "0.3.8", features = [ "winuser" ] }
-image = { version = "0.23.2", optional = true }
-
-[dev-dependencies]
-image = "0.23.2"
+winapi = { version = "0.3.8", features = [ "winuser", "impl-default" ] }
+image = { version = "0.23.2" }
