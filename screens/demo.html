@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ROR2 command image tester</title>
+
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+        }
+
+        img {
+            display: none;
+        }
+
+        .shown {
+            display: block;
+            position: absolute;
+            top: 0px;
+            left: 0px;
+            right: 0px;
+            bottom: 0px;
+        }
+    </style>
+</head>
+<body>
+    <p>Press W, G, or R to display an image</p>
+
+    <img id="white" src="./white_items.jpg" alt="white items">
+    <img id="green" src="./green_items.jpg" alt="green items">
+    <img id="red" src="./red_items.jpg" alt="red items">
+
+    <script>
+        document.addEventListener('keydown', (e) => {
+            console.log('user typed', e.key);
+            if (e.key === 'w') {
+                setShown('white');
+            } else if (e.key === 'r') {
+                setShown('green');
+            } else if (e.key === 'g') {
+                setShown('red');
+            }
+        });
+
+        function setShown(id) {
+            document.querySelectorAll('img')
+                .forEach(
+                    (e) => e.id === id
+                        ? e.classList.add('shown')
+                        : e.classList.remove('shown')
+                );
+        }
+    </script>
+</body>
+</html>

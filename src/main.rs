@@ -27,6 +27,9 @@ fn main() -> Result<(), ()> {
         grid_size,
     };
 
+    sleep(Duration::from_millis(3000));
+    print!("\x07");
+
     let opts = AnalysisOptions {
         left: 671,
         right: 1244,
