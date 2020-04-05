@@ -14,6 +14,7 @@ use std::mem::MaybeUninit;
 use std::convert::TryInto;
 use std::borrow::Cow;
 use std::fmt;
+use std::fs::File;
 
 pub struct ItemPos(pub u32, pub u32);
 
@@ -99,7 +100,7 @@ impl ColorSrc for Win32Bitmap {
         // buffer is layed out from top to bottom, left to right, 32bits per pixel
         // row alignment and endianness is unknown - assume 0 and little endian for now
         let (width, _) = self.1;
-        let index = (y as usize) * width + (x as usize);
+        let index = 4 * ((y as usize) * width + (x as usize));
         let bytes: [u8; 4] = self.0[index..index+4].try_into().unwrap();
         let pixel = u32::from_le_bytes(bytes);
         Win32Color(pixel)
@@ -108,15 +109,15 @@ impl ColorSrc for Win32Bitmap {
 
 impl Color for Win32Color {
     fn get_red(&self) -> u8 {
-        (self.0 & 0x000000FF) as u8
+        ((self.0 & 0x00FF00FF) >> 16) as u8
     }
 
     fn get_green(&self) -> u8 {
-        ((self.0 & 0x0000FF00) >> 1) as u8
+        ((self.0 & 0x0000FF00) >> 8) as u8
     }
 
     fn get_blue(&self) -> u8 {
-        ((self.0 & 0x00FF0000) >> 2) as u8
+        ((self.0 & 0x000000FF) >> 0) as u8
     }
 }
 
@@ -159,6 +160,8 @@ pub fn analyze_bitmap<T: Clone + fmt::Debug, C: ColorSrc>(
     log: bool,
 ) -> Option<T> {
     let mut min = None;
+
+    // debug_color_src("analyzed.bmp", bitmap, opts.left, opts.y - 1, opts.right - opts.left + opts.span, 3);
 
     for (color, result) in checking {
         let left_dist = average_distance2(
@@ -223,6 +226,28 @@ pub fn color_distance2<C: Color>(c: C, (r, g, b): &(i32, i32, i32)) -> i32 {
     (src_red - r).pow(2)
         + (src_green - g).pow(2)
         + (src_blue - b).pow(2)
+}
+
+/// Use this to quickly print out images
+///
+/// Very handy for debugging.
+#[allow(unused)]
+fn debug_color_src<C: ColorSrc>(path: &str, c: &C, left: i32, top: i32, width: i32, height: i32) {
+    let buffer_size = (3 * width * height) as usize;
+    let buffer = vec![0; buffer_size];
+    let mut img = RgbImage::from_raw(width as _, height as _, buffer).unwrap();
+
+    for yi in 0..height {
+        for xi in 0..width {
+            let output = img.get_pixel_mut(xi as _, yi as _);
+            let input = c.get_pixel(xi + left, yi + top);
+            output.0[0] = input.get_red();
+            output.0[1] = input.get_green();
+            output.0[2] = input.get_blue();
+        }
+    }
+
+    img.save(path).expect("failed to write debug image");
 }
 
 fn screencap() -> Result<Win32Bitmap, Cow<'static, str>> {

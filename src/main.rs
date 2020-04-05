@@ -31,12 +31,12 @@ fn main() -> Result<(), ()> {
     print!("\x07");
 
     let opts = AnalysisOptions {
-        left: 671,
+        left: 672,
         right: 1244,
         y: 1080 / 2,
         span: 4,
-        permitted_deviation: 0.05,
-        max_distance: 100000,
+        permitted_deviation: 0.03,
+        max_distance: 40_000,
     };
     let checking = &[
         ((242, 246, 232), ItemClass::White),
