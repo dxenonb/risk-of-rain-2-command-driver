@@ -18,6 +18,7 @@ fn main() -> Result<(), ()> {
 
     let mut grid_size = HashMap::new();
     grid_size.insert(ItemClass::White, (5, 5));
+    grid_size.insert(ItemClass::Green, (5, 5));
     grid_size.insert(ItemClass::Red, (5, 4));
 
     let screen = ScreenInfo {
@@ -43,17 +44,25 @@ fn main() -> Result<(), ()> {
 
     let mut xbox_buttons = Default::default();
     loop {
-        let pressed = ror2_command::xinput::get_just_pressed(0, &mut xbox_buttons)
-            .expect("controller was disconnected");
+        let pressed = ror2_command::xinput::get_just_pressed(0, &mut xbox_buttons);
+        if let None = pressed {
+            println!("controller was disconnected");
+            break;
+        }
+        let pressed = pressed.unwrap();
         if pressed.x {
+            // the panel has an animation that takes a few frames to open
+            sleep(Duration::from_millis(30));
             let result = analyze_screencap(&opts, checking, false);
             match result {
                 Err(err) => {
                     println!("analysis ended with error: {}", err);
                 },
-                Ok(t) => {
-                    println!("detected item: {:?}", t);
-                }
+                Ok(Some(item)) => {
+                    println!("Detected item: {:?}", item);
+                    debug_mouse(&mut robot, &item, &screen);
+                },
+                Ok(None) => {},
             }
         }
     }
@@ -69,7 +78,7 @@ fn debug_mouse<R: Robot>(robot: &mut R, class: &ItemClass, screen: &ScreenInfo) 
         for x in 0..*width {
             let pos = item_to_screen_pos(screen, class, ItemPos(x, y));
             robot.mouse_to(pos);
-            sleep(Duration::from_millis(500));
+            sleep(Duration::from_millis(100));
         }
     }
 }
