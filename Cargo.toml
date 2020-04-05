@@ -5,5 +5,5 @@ authors = ["dxb"]
 edition = "2018"
 
 [dependencies]
-winapi = { version = "0.3.8", features = [ "winuser", "impl-default" ] }
+winapi = { version = "0.3.8", features = [ "winuser", "impl-default", "xinput" ] }
 image = { version = "0.23.2" }

@@ -1,5 +1,3 @@
-pub mod robot;
-
 use image::{
     Pixel,
     RgbImage,
@@ -14,7 +12,9 @@ use std::mem::MaybeUninit;
 use std::convert::TryInto;
 use std::borrow::Cow;
 use std::fmt;
-use std::fs::File;
+
+pub mod robot;
+pub mod xinput;
 
 pub struct ItemPos(pub u32, pub u32);
 
