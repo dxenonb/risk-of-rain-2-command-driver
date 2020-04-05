@@ -1,11 +1,10 @@
 use ror2_command::robot;
-use ror2_command::robot::{Robot, MousePos};
+use ror2_command::robot::{Robot};
 use ror2_command::{
     ItemPos,
     ItemClass,
     ScreenInfo,
     item_to_screen_pos,
-    screen_cap,
 };
 
 use std::collections::HashMap;
@@ -27,7 +26,7 @@ fn main() -> Result<(), ()> {
     };
 
     // debug_mouse(&mut robot, &ItemClass::White, &screen);
-    screen_cap();
+    // screen_cap();
 
     Ok(())
 }

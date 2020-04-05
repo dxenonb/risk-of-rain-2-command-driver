@@ -42,6 +42,23 @@ pub enum ItemClass {
     BossItem,
 }
 
+pub struct AnalysisOptions {
+    left: i32,
+    /// Should be the right edge of the spot to start checking
+    ///
+    /// You will want to factor in the value of `span`.
+    right: i32,
+    y: i32,
+    span: i32,
+    /// How different the right can be from the left, as a percentage
+    ///
+    /// E.g. 0.1 means the right can be +/-10% from the right side
+    permitted_deviation: f32,
+    max_distance: i32,
+}
+
+type ColorCheck<'a, T> = &'a [((i32, i32, i32), T)];
+
 pub struct Win32Color(u32);
 pub struct Win32Bitmap(pub Vec<u8>, (usize, usize));
 
@@ -141,7 +158,89 @@ impl<P: Pixel<Subpixel=u8>> Color for P {
     }
 }
 
-pub fn screen_cap() {
+pub fn analyze_screencap<T: Clone>(
+    opts: &AnalysisOptions,
+    checking: ColorCheck<T>,
+) -> Result<Option<T>, &'static str> {
+    // get screen info
+    let win32bitmap = screencap();
+
+    Ok(analyze_bitmap(opts, checking, &win32bitmap))
+}
+
+pub fn analyze_bitmap<T: Clone, C: ColorSrc>(
+    opts: &AnalysisOptions,
+    checking: ColorCheck<T>,
+    bitmap: &C,
+) -> Option<T> {
+    let mut min = None;
+
+    for (color, result) in checking {
+        let left_dist = average_distance2(
+            bitmap,
+            &color,
+            opts.left,
+            opts.y,
+            opts.span,
+        );
+        let right_dist = average_distance2(
+            bitmap,
+            &color,
+            opts.right,
+            opts.y,
+            opts.span,
+        );
+        let diff = (1.0 - left_dist as f32 / (right_dist as f32)).abs();
+        if diff > opts.permitted_deviation || left_dist > opts.max_distance {
+            continue;
+        }
+        let dist = left_dist;
+        match min {
+            None => {
+                min = Some((dist, result))
+            },
+            Some((prev_dist, _)) => {
+                if dist < prev_dist {
+                    min = Some((dist, result));
+                }
+            }
+        }
+    }
+
+    min.map(|(_, val)| val.clone())
+}
+
+pub fn average_distance2<C: ColorSrc>(
+    bitmap: &C,
+    target_color: &(i32, i32, i32),
+    mut x: i32,
+    y: i32,
+    span: i32,
+) -> i32 {
+    let mut sum = 0;
+    for _ in 0..span {
+        let color = bitmap.get_pixel(x, y);
+        sum += color_distance2(color, target_color);
+        x += 1;
+    }
+
+    sum / span
+}
+
+pub fn color_distance2<C: Color>(c: C, (r, g, b): &(i32, i32, i32)) -> i32 {
+    let src_red = c.get_red() as i32;
+    let src_green = c.get_green() as i32;
+    let src_blue = c.get_blue() as i32;
+
+    (src_red - r).pow(2)
+        + (src_green - g).pow(2)
+        + (src_blue - b).pow(2)
+}
+
+fn screencap() -> Win32Bitmap {
+    // Adapted from:
+    // https://stackoverflow.com/questions/3291167/how-can-i-take-a-screenshot-in-a-windows-application
+
     use winapi::shared::minwindef::WORD;
     use winapi::um::winuser::{
         GetDC,
@@ -169,11 +268,8 @@ pub fn screen_cap() {
         BITMAPINFOHEADER,
         DIB_RGB_COLORS,
     };
-    // Adapted from:
-    // https://stackoverflow.com/questions/3291167/how-can-i-take-a-screenshot-in-a-windows-application
 
     unsafe {
-        // get screen info
         let x  = GetSystemMetrics(SM_XVIRTUALSCREEN);
         let y  = GetSystemMetrics(SM_YVIRTUALSCREEN);
         let cx = GetSystemMetrics(SM_CXVIRTUALSCREEN);
@@ -184,7 +280,7 @@ pub fn screen_cap() {
         let dc_target = CreateCompatibleDC(dc_screen);
         let bmp_target = CreateCompatibleBitmap(dc_screen, cx, cy);
         if bmp_target == ptr::null_mut() {
-            panic!("Bitmap creation failed");
+            panic!("Bitmap creation failed - resources are leaked");
         }
         let old_bmp = SelectObject(dc_target, bmp_target as *mut _);
         if BitBlt(dc_target, 0, 0, cx, cy, dc_screen, x, y, SRCCOPY | CAPTUREBLT) == 0 {
@@ -233,51 +329,13 @@ pub fn screen_cap() {
             println!("Result of getting bits is: {}, expected no. of scanlines {}", r, cy);
         }
 
-        let win32bitmap = Win32Bitmap(bits, (cx as _, cy as _));
-
-        // process the bitmap
-        {
-            // get avg distance from target color across left side
-            let green = (118, 237, 34);
-            let avg = average_distance2(win32bitmap, &green, 671, cy/2, 10);
-            println!("Got avg: {}", avg);
-            // across the right side
-            // find the minimum
-            // verify they are similar
-        }
-
         SelectObject(dc_target, old_bmp);
         DeleteDC(dc_target);
         ReleaseDC(ptr::null_mut(), dc_screen);
 
         // free the bitmap object
         DeleteObject(bmp_target as *mut _);
+
+        Win32Bitmap(bits, (cx as _, cy as _))
     }
-}
-
-pub fn average_distance2<C: ColorSrc>(
-    bitmap: C,
-    target_color: &(i32, i32, i32),
-    mut x: i32,
-    y: i32,
-    span: i32,
-) -> i32 {
-    let mut sum = 0;
-    for _ in 0..span {
-        let color = bitmap.get_pixel(x, y);
-        sum += color_distance2(color, target_color);
-        x += 1;
-    }
-
-    sum / span
-}
-
-pub fn color_distance2<C: Color>(c: C, (r, g, b): &(i32, i32, i32)) -> i32 {
-    let src_red = c.get_red() as i32;
-    let src_green = c.get_green() as i32;
-    let src_blue = c.get_blue() as i32;
-
-    (src_red - r).pow(2)
-        + (src_green - g).pow(2)
-        + (src_blue - b).pow(2)
 }
