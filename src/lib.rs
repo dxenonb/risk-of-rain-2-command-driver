@@ -1,7 +1,5 @@
 pub mod robot;
 
-use winapi::shared::windef::{COLORREF, HBITMAP};
-
 use std::collections::HashMap;
 use std::cmp;
 use std::ptr;
@@ -68,6 +66,52 @@ pub fn item_to_screen_pos(
     robot::MousePos(x as _, y as _)
 }
 
+trait ColorSrc {
+    type C: Color;
+
+    fn get_pixel(&self, x: i32, y: i32) -> Self::C;
+}
+
+trait Color {
+    fn get_red(&self) -> u8;
+    fn get_blue(&self) -> u8;
+    fn get_green(&self) -> u8;
+}
+
+impl ColorSrc for winapi::shared::windef::HBITMAP {
+    type C = winapi::shared::windef::COLORREF;
+
+    fn get_pixel(&self, x: i32, y: i32) -> Self::C {
+        use winapi::um::wingdi::{GetPixel, CLR_INVALID};
+
+        let pixel = unsafe { GetPixel(*self as *mut _, x, y) };
+        if pixel == CLR_INVALID {
+            panic!(
+                "Got invalid color for ({}, {}) - position must be out of bounds!",
+                x,
+                y
+            );
+        }
+        pixel
+    }
+}
+
+impl Color for winapi::shared::windef::COLORREF {
+
+    fn get_red(&self) -> u8 {
+        winapi::um::wingdi::GetRValue(*self)
+    }
+
+    fn get_green(&self) -> u8 {
+        winapi::um::wingdi::GetBValue(*self)
+    }
+
+    fn get_blue(&self) -> u8 {
+        winapi::um::wingdi::GetGValue(*self)
+    }
+
+}
+
 pub fn screen_cap() {
     use winapi::um::winuser::{
         GetDC,
@@ -120,7 +164,7 @@ pub fn screen_cap() {
             // find the minimum
             // verify they are similar
         }
-        
+
         SelectObject(dc_target, old_bmp);
         DeleteDC(dc_target);
         ReleaseDC(ptr::null_mut(), dc_screen);
@@ -130,22 +174,16 @@ pub fn screen_cap() {
     }
 }
 
-unsafe fn average_distance2(
-    bitmap: HBITMAP,
+unsafe fn average_distance2<C: ColorSrc>(
+    bitmap: C,
     target_color: &(i32, i32, i32),
     mut x: i32,
     y: i32,
     span: i32,
 ) -> i32 {
-    use winapi::um::wingdi::{GetPixel, CLR_INVALID};
-
     let mut sum = 0;
     for i in 0..span {
-        let color = GetPixel(bitmap as *mut _, x, y);
-        if color == CLR_INVALID {
-            panic!("Got invalid color for {}th pixel of span ({}, {}) \
-                - position must be out of bounds!", i, x, y);
-        }
+        let color = bitmap.get_pixel(x, y);
         sum += color_distance2(color, target_color);
         x += 1;
     }
@@ -153,12 +191,10 @@ unsafe fn average_distance2(
     sum / span
 }
 
-fn color_distance2(color: COLORREF, (r, g, b): &(i32, i32, i32)) -> i32 {
-    use winapi::um::wingdi::{GetRValue, GetGValue, GetBValue};
-
-    let src_red = GetRValue(color) as i32;
-    let src_green = GetGValue(color) as i32;
-    let src_blue = GetBValue(color) as i32;
+fn color_distance2<C: Color>(c: C, (r, g, b): &(i32, i32, i32)) -> i32 {
+    let src_red = c.get_red() as i32;
+    let src_green = c.get_green() as i32;
+    let src_blue = c.get_blue() as i32;
 
     (src_red - r).pow(2)
         + (src_green - g).pow(2)
