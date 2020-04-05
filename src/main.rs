@@ -27,15 +27,6 @@ fn main() -> Result<(), ()> {
         grid_size,
     };
 
-    let mut xbox_buttons = Default::default();
-    loop {
-        let pressed = ror2_command::xinput::get_just_pressed(0, &mut xbox_buttons)
-            .expect("controller was disconnected");
-        if pressed.x {
-            println!("boop!");
-        }
-    }
-
     let opts = AnalysisOptions {
         left: 672,
         right: 1244,
@@ -49,13 +40,21 @@ fn main() -> Result<(), ()> {
         ((118, 237, 34), ItemClass::Green),
         ((212, 83, 54), ItemClass::Red),
     ];
-    let result = analyze_screencap(&opts, checking, true);
-    match result {
-        Err(err) => {
-            println!("analysis ended with error: {}", err);
-        },
-        Ok(t) => {
-            println!("detected item: {:?}", t);
+
+    let mut xbox_buttons = Default::default();
+    loop {
+        let pressed = ror2_command::xinput::get_just_pressed(0, &mut xbox_buttons)
+            .expect("controller was disconnected");
+        if pressed.x {
+            let result = analyze_screencap(&opts, checking, false);
+            match result {
+                Err(err) => {
+                    println!("analysis ended with error: {}", err);
+                },
+                Ok(t) => {
+                    println!("detected item: {:?}", t);
+                }
+            }
         }
     }
 
