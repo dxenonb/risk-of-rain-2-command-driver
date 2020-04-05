@@ -27,8 +27,14 @@ fn main() -> Result<(), ()> {
         grid_size,
     };
 
-    sleep(Duration::from_millis(3000));
-    print!("\x07");
+    let mut xbox_buttons = Default::default();
+    loop {
+        let pressed = ror2_command::xinput::get_just_pressed(0, &mut xbox_buttons)
+            .expect("controller was disconnected");
+        if pressed.x {
+            println!("boop!");
+        }
+    }
 
     let opts = AnalysisOptions {
         left: 672,

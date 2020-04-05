@@ -42,13 +42,17 @@ pub fn get_input(index: u32) -> Option<XboxButtons> {
     })
 }
 
-pub fn get_just_pressed(index: u32, prev: &XboxButtons) -> Option<XboxButtons> {
+pub fn get_just_pressed(index: u32, prev: &mut XboxButtons) -> Option<XboxButtons> {
     let next = get_input(index)?;
 
-    Some(XboxButtons {
+    let r = Some(XboxButtons {
         a: next.a && !prev.a,
         x: next.x && !prev.x,
         y: next.y && !prev.y,
         b: next.b && !prev.b,
-    })
+    });
+
+    *prev = next;
+
+    r
 }
