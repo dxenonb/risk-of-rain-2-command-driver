@@ -1,6 +1,5 @@
 pub mod robot;
 
-#[cfg(feature="image-impl")]
 use image::{
     Pixel,
     RgbImage,
@@ -12,8 +11,7 @@ use std::cmp;
 use std::ptr;
 use std::mem;
 use std::mem::MaybeUninit;
-#[cfg(feature="image-impl")]
-use std::ops::Deref;
+use std::convert::TryInto;
 
 pub struct ItemPos(pub u32, pub u32);
 
@@ -44,8 +42,8 @@ pub enum ItemClass {
     BossItem,
 }
 
-pub struct Win32Color(pub winapi::shared::windef::COLORREF);
-pub struct Win32Bitmap(pub winapi::shared::windef::HBITMAP);
+pub struct Win32Color(u32);
+pub struct Win32Bitmap(pub Vec<u8>, (usize, usize));
 
 /// Describes the ROR2 command chest UI and user's screen
 ///
@@ -96,35 +94,30 @@ impl ColorSrc for Win32Bitmap {
     type C = Win32Color;
 
     fn get_pixel(&self, x: i32, y: i32) -> Self::C {
-        use winapi::um::wingdi::{GetPixel, CLR_INVALID};
-
-        let pixel = unsafe { GetPixel(self.0 as *mut _, x, y) };
-        if pixel == CLR_INVALID {
-            panic!(
-                "Got invalid color for ({}, {}) - position must be out of bounds!",
-                x,
-                y
-            );
-        }
+        // buffer is layed out from top to bottom, left to right, 32bits per pixel
+        // row alignment and endianness is unknown - assume 0 and little endian for now
+        let (width, _) = self.1;
+        let index = (y as usize) * width + (x as usize);
+        let bytes: [u8; 4] = self.0[index..index+4].try_into().unwrap();
+        let pixel = u32::from_le_bytes(bytes);
         Win32Color(pixel)
     }
 }
 
 impl Color for Win32Color {
     fn get_red(&self) -> u8 {
-        winapi::um::wingdi::GetRValue(self.0)
+        (self.0 & 0x000000FF) as u8
     }
 
     fn get_green(&self) -> u8 {
-        winapi::um::wingdi::GetBValue(self.0)
+        ((self.0 & 0x0000FF00) >> 1) as u8
     }
 
     fn get_blue(&self) -> u8 {
-        winapi::um::wingdi::GetGValue(self.0)
+        ((self.0 & 0x00FF0000) >> 2) as u8
     }
 }
 
-#[cfg(feature="image-impl")]
 impl ColorSrc for &RgbImage
 {
     type C = Rgb<u8>;
@@ -134,7 +127,6 @@ impl ColorSrc for &RgbImage
     }
 }
 
-#[cfg(feature="image-impl")]
 impl<P: Pixel<Subpixel=u8>> Color for P {
     fn get_red(&self) -> u8 {
         self.to_rgb().0[0]
@@ -175,8 +167,6 @@ pub fn screen_cap() {
         BI_RGB,
         BITMAPINFO,
         BITMAPINFOHEADER,
-        BITMAPFILEHEADER,
-        RGBQUAD,
         DIB_RGB_COLORS,
     };
     // Adapted from:
@@ -201,19 +191,7 @@ pub fn screen_cap() {
             panic!("Bit blitting failed");
         }
 
-        // process the bitmap ////
-        // {
-        //     let bmp_target = Win32Bitmap(bmp_target);
-        //     // get avg distance from target color across left side
-        //     let green = (118, 237, 34);
-        //     let avg = average_distance2(bmp_target, &green, 671, cy/2, 10);
-        //     println!("Got avg: {}", avg);
-        //     // across the right side
-        //     // find the minimum
-        //     // verify they are similar
-        // }
-
-        // save bitmap to a file
+        // extract bitmap buffer (using winapi `GetPixel` was not working)
         let mut buffer: MaybeUninit<BITMAP> = MaybeUninit::uninit();
         let bitmap_size = mem::size_of::<BITMAP>() as _;
         let result = GetObjectA(bmp_target as *mut _, bitmap_size, buffer.as_mut_ptr() as *mut _);
@@ -238,11 +216,8 @@ pub fn screen_cap() {
             bmiColors: Default::default(),
         };
         let size_image = (((bmp.bmWidth * (clr_bits as i32) + 31) & !31) / 8 * bmp.bmHeight) as usize;
-        bmi.bmiHeader.biSizeImage = (((bmi.bmiHeader.biWidth * (clr_bits as i32) + 31) & !31) / 8
-            * bmi.bmiHeader.biHeight) as _;
+        bmi.bmiHeader.biSizeImage = size_image as _;
         bmi.bmiHeader.biClrImportant = 0;
-
-        use std::fs::File;
 
         let mut bits: Vec<u8> = vec![0; size_image];
         let r = GetDIBits(
@@ -258,10 +233,18 @@ pub fn screen_cap() {
             println!("Result of getting bits is: {}, expected no. of scanlines {}", r, cy);
         }
 
-        let mut f = File::create("bitmap.png").unwrap();
-        let encoder = image::png::PNGEncoder::new(&mut f);
-        encoder.encode(&bits, cx as _, cy as _, image::ColorType::Bgra8)
-            .unwrap();
+        let win32bitmap = Win32Bitmap(bits, (cx as _, cy as _));
+
+        // process the bitmap
+        {
+            // get avg distance from target color across left side
+            let green = (118, 237, 34);
+            let avg = average_distance2(win32bitmap, &green, 671, cy/2, 10);
+            println!("Got avg: {}", avg);
+            // across the right side
+            // find the minimum
+            // verify they are similar
+        }
 
         SelectObject(dc_target, old_bmp);
         DeleteDC(dc_target);
