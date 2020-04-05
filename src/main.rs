@@ -1,10 +1,12 @@
 use ror2_command::robot;
 use ror2_command::robot::{Robot};
 use ror2_command::{
+    AnalysisOptions,
     ItemPos,
     ItemClass,
     ScreenInfo,
     item_to_screen_pos,
+    analyze_screencap,
 };
 
 use std::collections::HashMap;
@@ -25,12 +27,33 @@ fn main() -> Result<(), ()> {
         grid_size,
     };
 
-    // debug_mouse(&mut robot, &ItemClass::White, &screen);
-    // screen_cap();
+    let opts = AnalysisOptions {
+        left: 671,
+        right: 1244,
+        y: 1080 / 2,
+        span: 4,
+        permitted_deviation: 0.05,
+        max_distance: 100000,
+    };
+    let checking = &[
+        ((242, 246, 232), ItemClass::White),
+        ((118, 237, 34), ItemClass::Green),
+        ((212, 83, 54), ItemClass::Red),
+    ];
+    let result = analyze_screencap(&opts, checking, true);
+    match result {
+        Err(err) => {
+            println!("analysis ended with error: {}", err);
+        },
+        Ok(t) => {
+            println!("detected item: {:?}", t);
+        }
+    }
 
     Ok(())
 }
 
+#[allow(unused)]
 fn debug_mouse<R: Robot>(robot: &mut R, class: &ItemClass, screen: &ScreenInfo) {
     let (width, height) = screen.grid_size.get(class).unwrap();
 

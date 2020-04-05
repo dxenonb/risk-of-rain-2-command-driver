@@ -12,25 +12,10 @@ use std::ptr;
 use std::mem;
 use std::mem::MaybeUninit;
 use std::convert::TryInto;
+use std::borrow::Cow;
+use std::fmt;
 
 pub struct ItemPos(pub u32, pub u32);
-
-trait ItemEngine {
-    fn select_item(&mut self, action: &Ror2Action) -> ItemPos;
-}
-
-enum Ror2Action {
-    SelectWhite,
-    SelectGreen,
-    SelectRed,
-    SelectLunar,
-    SelectUseItem,
-    SelectBossItem,
-}
-
-trait ActionDetector {
-    fn read_screen(&mut self) -> Ror2Action;
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ItemClass {
@@ -43,18 +28,18 @@ pub enum ItemClass {
 }
 
 pub struct AnalysisOptions {
-    left: i32,
+    pub left: i32,
     /// Should be the right edge of the spot to start checking
     ///
     /// You will want to factor in the value of `span`.
-    right: i32,
-    y: i32,
-    span: i32,
+    pub right: i32,
+    pub y: i32,
+    pub span: i32,
     /// How different the right can be from the left, as a percentage
     ///
     /// E.g. 0.1 means the right can be +/-10% from the right side
-    permitted_deviation: f32,
-    max_distance: i32,
+    pub permitted_deviation: f32,
+    pub max_distance: i32,
 }
 
 type ColorCheck<'a, T> = &'a [((i32, i32, i32), T)];
@@ -158,20 +143,20 @@ impl<P: Pixel<Subpixel=u8>> Color for P {
     }
 }
 
-pub fn analyze_screencap<T: Clone>(
+pub fn analyze_screencap<T: Clone + fmt::Debug>(
     opts: &AnalysisOptions,
     checking: ColorCheck<T>,
-) -> Result<Option<T>, &'static str> {
-    // get screen info
-    let win32bitmap = screencap();
-
-    Ok(analyze_bitmap(opts, checking, &win32bitmap))
+    log: bool,
+) -> Result<Option<T>, Cow<'static, str>> {
+    let win32bitmap = screencap()?;
+    Ok(analyze_bitmap(opts, checking, &win32bitmap, log))
 }
 
-pub fn analyze_bitmap<T: Clone, C: ColorSrc>(
+pub fn analyze_bitmap<T: Clone + fmt::Debug, C: ColorSrc>(
     opts: &AnalysisOptions,
     checking: ColorCheck<T>,
     bitmap: &C,
+    log: bool,
 ) -> Option<T> {
     let mut min = None;
 
@@ -190,6 +175,9 @@ pub fn analyze_bitmap<T: Clone, C: ColorSrc>(
             opts.y,
             opts.span,
         );
+        if log {
+            println!("For {:?}, got dists: {}, {}", result, left_dist, right_dist);
+        }
         let diff = (1.0 - left_dist as f32 / (right_dist as f32)).abs();
         if diff > opts.permitted_deviation || left_dist > opts.max_distance {
             continue;
@@ -237,15 +225,39 @@ pub fn color_distance2<C: Color>(c: C, (r, g, b): &(i32, i32, i32)) -> i32 {
         + (src_blue - b).pow(2)
 }
 
-fn screencap() -> Win32Bitmap {
+fn screencap() -> Result<Win32Bitmap, Cow<'static, str>> {
     // Adapted from:
     // https://stackoverflow.com/questions/3291167/how-can-i-take-a-screenshot-in-a-windows-application
+    use winapi::um::winuser::ReleaseDC;
+    use winapi::um::wingdi::{
+        DeleteObject,
+        DeleteDC,
+    };
 
+    unsafe {
+        let mut dc_screen = ptr::null_mut();
+        let mut dc_target = ptr::null_mut();
+        let mut bmp_target = ptr::null_mut();
+
+        let result = screencap_inner(&mut dc_screen, &mut dc_target, &mut bmp_target);
+
+        DeleteObject(bmp_target as *mut _);
+        DeleteDC(dc_target);
+        ReleaseDC(ptr::null_mut(), dc_screen);
+
+        result
+    }
+}
+
+fn screencap_inner(
+    dc_screen: &mut winapi::shared::windef::HDC,
+    dc_target: &mut winapi::shared::windef::HDC,
+    bmp_target: &mut winapi::shared::windef::HBITMAP,
+) -> Result<Win32Bitmap, Cow<'static, str>> {
     use winapi::shared::minwindef::WORD;
     use winapi::um::winuser::{
         GetDC,
         GetSystemMetrics,
-        ReleaseDC,
         SM_XVIRTUALSCREEN,
         SM_YVIRTUALSCREEN,
         SM_CXVIRTUALSCREEN,
@@ -256,9 +268,7 @@ fn screencap() -> Win32Bitmap {
         CreateCompatibleBitmap,
         GetObjectA,
         SelectObject,
-        DeleteObject,
         BitBlt,
-        DeleteDC,
         GetDIBits,
         SRCCOPY,
         CAPTUREBLT,
@@ -270,21 +280,33 @@ fn screencap() -> Win32Bitmap {
     };
 
     unsafe {
-        let x  = GetSystemMetrics(SM_XVIRTUALSCREEN);
-        let y  = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        let x = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        let y = GetSystemMetrics(SM_YVIRTUALSCREEN);
         let cx = GetSystemMetrics(SM_CXVIRTUALSCREEN);
         let cy = GetSystemMetrics(SM_CYVIRTUALSCREEN);
 
-        // get a screen cap, save to bitmap
-        let dc_screen = GetDC(ptr::null_mut());
-        let dc_target = CreateCompatibleDC(dc_screen);
-        let bmp_target = CreateCompatibleBitmap(dc_screen, cx, cy);
-        if bmp_target == ptr::null_mut() {
-            panic!("Bitmap creation failed - resources are leaked");
+        *dc_screen = GetDC(ptr::null_mut());
+        let dc_screen = *dc_screen;
+        if dc_screen == ptr::null_mut() {
+            return Err(Cow::from("failed to get screen DC"));
         }
+
+        *dc_target = CreateCompatibleDC(dc_screen);
+        let dc_target = *dc_target;
+        if dc_target == ptr::null_mut() {
+            return Err(Cow::from("failed to create target DC"));
+        }
+
+        *bmp_target = CreateCompatibleBitmap(dc_screen, cx, cy);
+        let bmp_target = *bmp_target;
+        if bmp_target == ptr::null_mut() {
+            return Err(Cow::from("bitmap creation failed"));
+        }
+
         let old_bmp = SelectObject(dc_target, bmp_target as *mut _);
+
         if BitBlt(dc_target, 0, 0, cx, cy, dc_screen, x, y, SRCCOPY | CAPTUREBLT) == 0 {
-            panic!("Bit blitting failed");
+            return Err(Cow::from("Bit blitting failed"));
         }
 
         // extract bitmap buffer (using winapi `GetPixel` was not working)
@@ -292,12 +314,12 @@ fn screencap() -> Win32Bitmap {
         let bitmap_size = mem::size_of::<BITMAP>() as _;
         let result = GetObjectA(bmp_target as *mut _, bitmap_size, buffer.as_mut_ptr() as *mut _);
         if result == 0 || result != bitmap_size {
-            panic!("Failed to get object");
+            return Err(Cow::from("failed to get object"));
         }
         let bmp = buffer.assume_init();
         let clr_bits: WORD = (bmp.bmPlanes * bmp.bmBitsPixel) as _;
         if clr_bits != 32 {
-            panic!("expected 32 bit image, got {}", clr_bits);
+            return Err(Cow::from(format!("expected 32 bit image, got {}", clr_bits)));
         }
         let mut bmi = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
@@ -326,16 +348,11 @@ fn screencap() -> Win32Bitmap {
             DIB_RGB_COLORS,
         );
         if r != cy {
-            println!("Result of getting bits is: {}, expected no. of scanlines {}", r, cy);
+            return Err(Cow::from(format!("GetDIBits is: {}, expected # of scanlines: {}", r, cy)));
         }
 
         SelectObject(dc_target, old_bmp);
-        DeleteDC(dc_target);
-        ReleaseDC(ptr::null_mut(), dc_screen);
 
-        // free the bitmap object
-        DeleteObject(bmp_target as *mut _);
-
-        Win32Bitmap(bits, (cx as _, cy as _))
+        Ok(Win32Bitmap(bits, (cx as _, cy as _)))
     }
 }
