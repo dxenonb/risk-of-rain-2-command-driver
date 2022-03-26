@@ -1,5 +1,5 @@
 use ror2_command::robot;
-use ror2_command::robot::{Robot};
+use ror2_command::robot::{Robot, MousePos};
 use ror2_command::{
     AnalysisOptions,
     ItemPos,
@@ -52,7 +52,7 @@ fn main() -> Result<(), ()> {
         let pressed = pressed.unwrap();
         if pressed.x {
             // the panel has an animation that takes a few frames to open
-            sleep(Duration::from_millis(30));
+            sleep(Duration::from_millis(50));
             let result = analyze_screencap(&opts, checking, false);
             match result {
                 Err(err) => {
@@ -60,7 +60,16 @@ fn main() -> Result<(), ()> {
                 },
                 Ok(Some(item)) => {
                     println!("Detected item: {:?}", item);
-                    debug_mouse(&mut robot, &item, &screen);
+                    let mut pos = item_to_screen_pos(&screen, &item, ItemPos(3, 3));
+                    let center = MousePos((screen.screen_size.0 / 2) as _, (screen.screen_size.1 / 2) as _);
+                    pos = pos - center;
+                    robot.click_on(center);
+                    robot.mouse_relative(MousePos(0, 0));
+                    robot.mouse_relative(pos);
+                    robot.mouse_relative(pos);
+                    robot.mouse_relative(pos);
+                    robot.mouse_relative(pos);
+                    println!("Mousing over: {:?}", pos);
                 },
                 Ok(None) => {},
             }
@@ -76,9 +85,9 @@ fn debug_mouse<R: Robot>(robot: &mut R, class: &ItemClass, screen: &ScreenInfo) 
 
     for y in 0..*height {
         for x in 0..*width {
-            let pos = item_to_screen_pos(screen, class, ItemPos(x, y));
-            robot.mouse_to(pos);
-            sleep(Duration::from_millis(100));
+            let mut pos = item_to_screen_pos(screen, class, ItemPos(x, y));
+            robot.click_on(pos);
+            sleep(Duration::from_millis(500));
         }
     }
 }
